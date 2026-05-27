@@ -1,0 +1,52 @@
+global:
+  helmCatalogRepoURL: https://github.com/purple-monkey/helm-catalog.git
+  platformAppsRepoURL: https://github.com/purple-monkey/platform-apps.git
+  platformConfigRepoURL: https://github.com/purple-monkey/platform-config.git
+  namespace: openshift-gitops
+  argoServerCluster: local-cluster
+
+org: acme
+
+# Each entry creates a ManagedClusterSet and a ManagedClusterSetBinding.
+# NOTE: after deploying, label local-cluster to join the management set:
+#   oc label managedcluster local-cluster \
+#     cluster.open-cluster-management.io/clusterset=management \
+#     platform/clusterType=hub \
+#     platform/clusterGroup=eng \
+#     platform/region=eu-west-1 \
+#     platform/version=main
+clusterSets:
+  - name: rosa-platform
+  - name: management
+
+# Each placement selects clusters from its clusterSet by clusterType label.
+placements:
+  - name: placement-rosa-dev
+    clusterSet: rosa-platform
+    clusterTypes:
+      - dev
+  - name: placement-rosa-preprod
+    clusterSet: rosa-platform
+    clusterTypes:
+      - preprod
+  - name: placement-rosa-prod
+    clusterSet: rosa-platform
+    clusterTypes:
+      - prod
+  - name: placement-hub
+    clusterSet: management
+    clusterTypes:
+      - hub
+
+# ApplicationSets — one per cluster tier.
+applicationSets:
+  - name: spoke-argocd-bootstrap
+    placement: placement-rosa-dev
+    requeueAfterSeconds: 180
+  - name: hub-self-management
+    placement: placement-hub
+    requeueAfterSeconds: 180
+
+spokeArgoCDBootstrap:
+  chart: spoke-argocd-bootstrap
+  destinationNamespace: openshift-gitops

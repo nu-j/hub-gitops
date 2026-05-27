@@ -1,0 +1,19 @@
+{{- range .Values.placements }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Values.global.namespace }}
+spec:
+  clusterSets:
+    - {{ .clusterSet }}
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: platform/clusterType
+              operator: In
+              values:
+                {{- toYaml .clusterTypes | nindent 16 }}
+{{- end }}
