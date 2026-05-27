@@ -46,6 +46,8 @@ applicationSets:
   - name: hub-self-management
     placement: placement-hub
     requeueAfterSeconds: 180
+    extraValues:
+      installOpenShiftGitOps: false
 
 spokeArgoCDBootstrap:
   chart: spoke-argocd-bootstrap

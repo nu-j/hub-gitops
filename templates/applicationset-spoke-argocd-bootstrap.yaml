@@ -36,6 +36,9 @@ spec:
             platformConfigRepoURL: {{ $.Values.global.platformConfigRepoURL }}
             platform:
               version: {{`{{index .metadata.labels "platform/version" | default "main"}}`}}
+            {{- range $k, $v := .extraValues }}
+            {{ $k }}: {{ $v }}
+            {{- end }}
       destination:
         server: '{{`{{.server}}`}}'
         namespace: {{ $.Values.spokeArgoCDBootstrap.destinationNamespace }}
