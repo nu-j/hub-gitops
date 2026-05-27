@@ -1,7 +1,7 @@
 global:
-  helmCatalogRepoURL: https://github.com/purple-monkey/helm-catalog.git
-  platformAppsRepoURL: https://github.com/purple-monkey/platform-apps.git
-  platformConfigRepoURL: https://github.com/purple-monkey/platform-config.git
+  helmCatalogRepoURL: https://github.com/nu-j/helm-catalog.git
+  platformAppsRepoURL: https://github.com/nu-j/platform-apps.git
+  platformConfigRepoURL: https://github.com/nu-j/platform-config.git
   namespace: openshift-gitops
   argoServerCluster: local-cluster
 
