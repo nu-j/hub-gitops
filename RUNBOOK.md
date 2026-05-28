@@ -41,7 +41,9 @@ Spoke cluster (bootstrapped automatically)
 
 ---
 
-## Step 1 — Push the repos to GitHub
+## Part 1 — Hub setup
+
+### Step 1 — Push the repos to GitHub
 
 Each subdirectory under `gitops-rework/` maps to one GitHub repo.
 
@@ -75,16 +77,16 @@ git push -u origin main
 
 ---
 
-## Step 2 — Update repo URLs in values files
+### Step 2 — Update repo URLs in values files
 
 Edit these two files with your actual GitHub org before installing:
 
-**`hub-gitops/values.yaml`** — the five `global.*RepoURL` fields:
+**`hub-gitops/values.yaml`** — the three `global.*RepoURL` fields:
 
 ```yaml
 global:
-  helmCatalogRepoURL:   https://github.com/YOUR_ORG/helm-catalog.git
-  platformAppsRepoURL:  https://github.com/YOUR_ORG/platform-apps.git
+  helmCatalogRepoURL:    https://github.com/YOUR_ORG/helm-catalog.git
+  platformAppsRepoURL:   https://github.com/YOUR_ORG/platform-apps.git
   platformConfigRepoURL: https://github.com/YOUR_ORG/platform-config.git
 ```
 
@@ -99,75 +101,9 @@ Commit and push both changes after editing.
 
 ---
 
-## Step 3 — Create a cluster definition for your spoke
+### Step 3 — Install the hub-gitops Helm chart
 
-Add a `clusterdef.yaml` for your spoke under `platform-config/clusters/dev/<group>/<region>/`.
-Use an existing file as a template, e.g. `clusters/dev/eng/eu-west-1/clusterdef.yaml`.
-
-```bash
-# Find the ROSA infrastructure ID (needed if enabling MachinePools later)
-oc get infrastructure cluster \
-  -o jsonpath='{.status.infrastructureName}' \
-  --context <spoke-context>
-```
-
-Commit and push `platform-config`.
-
----
-
-## Step 4 — Import the spoke cluster into ACM
-
-Log in to the **hub** cluster:
-
-```bash
-oc login <hub-api-url> --token=<hub-token>
-```
-
-### Option A — ACM console (easiest)
-
-1. Open the ACM console → **Infrastructure → Clusters → Import cluster**
-2. Enter the spoke's API URL and kubeconfig / token
-3. ACM will create a `ManagedCluster` resource named after the cluster
-
-### Option B — CLI
-
-```bash
-# Create the ManagedCluster shell (ACM imports via klusterlet-addon-config)
-cat <<EOF | oc apply -f -
-apiVersion: cluster.open-cluster-management.io/v1
-kind: ManagedCluster
-metadata:
-  name: <spoke-cluster-name>
-spec:
-  hubAcceptsClient: true
-EOF
-```
-
-Follow the import instructions that ACM surfaces (it will print a `kubectl` command to run on the spoke).
-
----
-
-## Step 5 — Label the spoke ManagedCluster
-
-Once the spoke shows `Available=True` in ACM, apply the platform labels so the Placement can select it:
-
-```bash
-oc label managedcluster <spoke-cluster-name> \
-  cluster.open-cluster-management.io/clusterset=rosa-platform \
-  platform/clusterType=dev \
-  platform/clusterGroup=eng \
-  platform/region=eu-west-1 \
-  platform/version=main \
-  --overwrite
-```
-
-> Adjust `clusterType`, `clusterGroup`, and `region` to match the `clusterdef.yaml` you created in Step 3.
-
----
-
-## Step 6 — Install the hub-gitops Helm chart
-
-From a local checkout of `hub-gitops/`:
+Log in to the hub and install from a local checkout of `hub-gitops/`:
 
 ```bash
 oc login <hub-api-url> --token=<hub-token>
@@ -192,9 +128,9 @@ helm template hub-platform . --namespace openshift-gitops
 
 ---
 
-## Step 7 — Label local-cluster for hub self-management
+### Step 4 — Label local-cluster for hub self-management
 
-This is a one-time step that triggers the hub to manage itself via the `hub-self-management` ApplicationSet:
+This triggers the `hub-self-management` ApplicationSet to deploy the root app-of-apps on the hub itself:
 
 ```bash
 oc label managedcluster local-cluster \
@@ -206,42 +142,107 @@ oc label managedcluster local-cluster \
   --overwrite
 ```
 
-> This cannot be done before Step 6 because the `management` ManagedClusterSet must exist before `local-cluster` can join it.
+> This must be done after Step 3 — the `management` ManagedClusterSet must exist before `local-cluster` can join it.
+
+### Step 5 — Verify hub self-management
+
+```bash
+# hub-self-management ApplicationSet should have generated one Application
+oc get applicationset hub-self-management -n openshift-gitops
+
+# Root Application for the hub should be visible
+oc get application platform-bootstrap-local-cluster -n openshift-gitops
+
+# platform-apps child Applications (ACS, alertmanager, operators) deploy from here
+oc get application -n platform-tools
+```
 
 ---
 
-## Step 8 — Watch the rollout
+## Part 2 — Spoke cluster onboarding
 
-### On the hub cluster
+### Step 6 — Create a cluster definition for your spoke
+
+Add a `clusterdef.yaml` for your spoke under `platform-config/clusters/dev/<group>/<region>/`.
+Use an existing file as a template, e.g. `clusters/dev/eng/eu-west-1/clusterdef.yaml`.
 
 ```bash
-# ApplicationSets should be healthy and generating Applications
-oc get applicationset -n openshift-gitops
-
-# One Application per cluster should appear (spoke + hub itself)
-oc get application -n openshift-gitops
-
-# Watch spoke bootstrap Application sync
-oc get application platform-bootstrap-<spoke-name> \
-  -n openshift-gitops -w
+# Find the ROSA infrastructure ID (needed if enabling MachinePools later)
+oc get infrastructure cluster \
+  -o jsonpath='{.status.infrastructureName}' \
+  --context <spoke-context>
 ```
 
-### On the spoke cluster
+Commit and push `platform-config`.
+
+---
+
+### Step 7 — Import the spoke cluster into ACM
+
+#### Option A — ACM console (easiest)
+
+1. Open the ACM console → **Infrastructure → Clusters → Import cluster**
+2. Enter the spoke's API URL and kubeconfig / token
+3. ACM will create a `ManagedCluster` resource named after the cluster
+
+#### Option B — CLI
+
+```bash
+cat <<EOF | oc apply -f -
+apiVersion: cluster.open-cluster-management.io/v1
+kind: ManagedCluster
+metadata:
+  name: <spoke-cluster-name>
+spec:
+  hubAcceptsClient: true
+EOF
+```
+
+Follow the import instructions that ACM surfaces (it will print a `kubectl` command to run on the spoke).
+
+---
+
+### Step 8 — Label the spoke ManagedCluster
+
+Once the spoke shows `Available=True` in ACM, apply the platform labels so the Placement can select it:
+
+```bash
+oc label managedcluster <spoke-cluster-name> \
+  cluster.open-cluster-management.io/clusterset=rosa-platform \
+  platform/clusterType=dev \
+  platform/clusterGroup=eng \
+  platform/region=eu-west-1 \
+  platform/version=main \
+  --overwrite
+```
+
+> Adjust `clusterType`, `clusterGroup`, and `region` to match the `clusterdef.yaml` you created in Step 6.
+
+---
+
+### Step 9 — Watch the spoke rollout
+
+```bash
+# ApplicationSet should have generated an Application for the spoke
+oc get application platform-bootstrap-<spoke-name> -n openshift-gitops -w
+```
+
+Switch to the spoke cluster to follow the bootstrap sequence:
 
 ```bash
 oc login <spoke-api-url> --token=<spoke-token>
 
-# OpenShift GitOps operator subscription created by bootstrap
+# OpenShift GitOps operator subscription (created by bootstrap)
 oc get subscription openshift-gitops-operator -n openshift-operators
 
-# Once GitOps is up, the root Application appears in openshift-gitops namespace
+# Once GitOps is up, the root Application appears
 oc get application -n openshift-gitops
 
 # platform-apps child Applications deploy from the root app
 oc get application -n platform-tools
 ```
 
-### Expected sequence on a spoke
+#### Expected sequence
 
 ```
 spoke-argocd-bootstrap ApplicationSet fires
@@ -254,18 +255,18 @@ spoke-argocd-bootstrap ApplicationSet fires
 
 ---
 
-## Step 9 — Adding a new cluster
+## Adding a new cluster
 
 1. Create its `clusterdef.yaml` in `platform-config/clusters/<type>/<group>/<region>/`
 2. Commit and push `platform-config`
-3. Import the cluster into ACM (Step 4)
-4. Apply the labels (Step 5) — the `spoke-argocd-bootstrap` ApplicationSet selects it automatically within `requeueAfterSeconds` (180s)
+3. Import the cluster into ACM (Step 7)
+4. Apply the labels (Step 8) — the `spoke-argocd-bootstrap` ApplicationSet selects it automatically within `requeueAfterSeconds` (180s)
 
 No changes to `hub-gitops` or any ApplicationSet are needed for a new cluster of the same type.
 
 ---
 
-## Step 10 — Troubleshooting
+## Troubleshooting
 
 ### ApplicationSet not generating Applications
 
@@ -273,13 +274,13 @@ No changes to `hub-gitops` or any ApplicationSet are needed for a new cluster of
 # Check the Placement is binding to clusters
 oc get placementdecision -n openshift-gitops
 
-# Verify the clusterset label on the ManagedCluster
+# Verify labels on the ManagedCluster
 oc get managedcluster <name> -o jsonpath='{.metadata.labels}' | jq
 ```
 
 Common causes:
-- Missing or incorrect `cluster.open-cluster-management.io/clusterset` label on the spoke — must match the `ManagedClusterSet` name exactly
-- `ManagedClusterSetBinding` missing — re-run `helm upgrade hub-platform`
+- Missing or incorrect `cluster.open-cluster-management.io/clusterset` label — must match the `ManagedClusterSet` name exactly
+- `ManagedClusterSetBinding` missing — re-run `helm upgrade hub-platform .`
 - `platform/clusterType` label value does not match any `placement.clusterTypes` entry
 
 ### Spoke GitOps operator stuck pending
@@ -288,7 +289,7 @@ Common causes:
 oc get installplan -n openshift-operators --context <spoke-context>
 ```
 
-The subscription uses `installPlanApproval: Automatic` so it should approve itself. If it is stuck, check that `openshift-marketplace` is healthy on the spoke:
+The subscription uses `installPlanApproval: Automatic` so it should self-approve. If stuck, check that `openshift-marketplace` is healthy on the spoke:
 
 ```bash
 oc get catalogsource -n openshift-marketplace --context <spoke-context>
@@ -307,7 +308,7 @@ platform-config/clusters/dev/eng/groupdef.yaml
 platform-config/clusters/dev/eng/eu-west-1/clusterdef.yaml
 ```
 
-`ignoreMissingValueFiles: true` is set, so missing files are skipped rather than causing errors — but a missing `clusterdef.yaml` means no cluster-specific overrides will apply.
+`ignoreMissingValueFiles: true` is set, so missing files are skipped — but a missing `clusterdef.yaml` means no cluster-specific overrides will apply.
 
 ### Argo CD repo credentials
 
