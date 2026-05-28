@@ -48,6 +48,9 @@ applicationSets:
     requeueAfterSeconds: 180
     extraValues:
       installOpenShiftGitOps: false
+      clusterType: hub
+      clusterGroup: eng
+      region: eu-west-1
 
 spokeArgoCDBootstrap:
   chart: spoke-argocd-bootstrap

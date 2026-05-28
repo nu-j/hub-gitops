@@ -8,7 +8,7 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions:
-    - missingkey=error
+    - missingkey=zero
   generators:
     - clusterDecisionResource:
         configMapRef: acm-placement
@@ -24,18 +24,18 @@ spec:
       source:
         repoURL: {{ $.Values.global.helmCatalogRepoURL | quote }}
         path: {{ $.Values.spokeArgoCDBootstrap.chart }}
-        targetRevision: '{{`{{index .metadata.labels "platform/version" | default "main"}}`}}'
+        targetRevision: '{{`{{if .metadata}}{{index .metadata.labels "platform/version" | default "main"}}{{else}}main{{end}}`}}'
         helm:
           values: |
             org: {{ $.Values.org }}
             clusterName: {{`{{.name}}`}}
-            clusterType: {{`{{index .metadata.labels "platform/clusterType"}}`}}
-            clusterGroup: {{`{{index .metadata.labels "platform/clusterGroup"}}`}}
-            region: {{`{{index .metadata.labels "platform/region"}}`}}
+            clusterType: {{`{{if .metadata}}{{index .metadata.labels "platform/clusterType"}}{{end}}`}}
+            clusterGroup: {{`{{if .metadata}}{{index .metadata.labels "platform/clusterGroup"}}{{end}}`}}
+            region: {{`{{if .metadata}}{{index .metadata.labels "platform/region"}}{{end}}`}}
             platformAppsRepoURL: {{ $.Values.global.platformAppsRepoURL }}
             platformConfigRepoURL: {{ $.Values.global.platformConfigRepoURL }}
             platform:
-              version: {{`{{index .metadata.labels "platform/version" | default "main"}}`}}
+              version: {{`{{if .metadata}}{{index .metadata.labels "platform/version" | default "main"}}{{else}}main{{end}}`}}
             {{- range $k, $v := .extraValues }}
             {{ $k }}: {{ $v }}
             {{- end }}
