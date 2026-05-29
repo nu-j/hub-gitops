@@ -8,6 +8,8 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions:
+    # missingkey=zero: render an empty string for missing map keys rather than erroring.
+    # Required because local-cluster's generator context does not populate .metadata.
     - missingkey=zero
   generators:
     - clusterDecisionResource:
@@ -24,6 +26,8 @@ spec:
       source:
         repoURL: {{ $.Values.global.helmCatalogRepoURL | quote }}
         path: {{ $.Values.spokeArgoCDBootstrap.chart }}
+        # platform/version label on the ManagedCluster controls which Git revision is deployed.
+        # Falls back to "main" for local-cluster (hub) which has no metadata labels in the generator.
         targetRevision: '{{`{{if .metadata}}{{index .metadata.labels "platform/version" | default "main"}}{{else}}main{{end}}`}}'
         helm:
           values: |
@@ -43,6 +47,11 @@ spec:
         server: '{{`{{.server}}`}}'
         namespace: {{ $.Values.spokeArgoCDBootstrap.destinationNamespace }}
       syncPolicy:
+        automated:
+          selfHeal: true
+          # prune: controls whether this bootstrap Application is deleted when the cluster
+          # loses its placement label. Set to false for prod to prevent accidental teardown.
+          prune: {{ .prune | default false }}
         syncOptions:
           - CreateNamespace=true
 {{- end }}

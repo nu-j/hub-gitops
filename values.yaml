@@ -5,53 +5,88 @@ global:
   namespace: openshift-gitops
   argoServerCluster: local-cluster
 
+# Organisation name — prefixed to generated Application names (e.g. acme-spoke-root-aoa)
 org: acme
 
-# Each entry creates a ManagedClusterSet and a ManagedClusterSetBinding.
-# NOTE: after deploying, label local-cluster to join the management set:
-#   oc label managedcluster local-cluster \
-#     cluster.open-cluster-management.io/clusterset=management \
-#     platform/clusterType=hub \
-#     platform/clusterGroup=eng \
-#     platform/region=eu-west-1 \
-#     platform/version=main
+# ── ManagedClusterSets ────────────────────────────────────────────────────────
+# One ManagedClusterSet + ManagedClusterSetBinding is created per entry.
+# Split by environment so each tier has its own cluster boundary and prune policy.
+#
+# After deploying, join spoke clusters to the correct set with:
+#   oc label managedcluster <name> \
+#     cluster.open-cluster-management.io/clusterset=<set-name>
 clusterSets:
-  - name: rosa-platform
-  - name: management
+  - name: dev       # development ROSA spokes
+  - name: preprod   # pre-production ROSA spokes
+  - name: prod      # production ROSA spokes
+  - name: management  # hub cluster (local-cluster) — not a ROSA spoke
 
-# Each placement selects clusters from its clusterSet by clusterType label.
+# ── Placements ────────────────────────────────────────────────────────────────
+# Each Placement selects clusters from its clusterSet by the platform/clusterType label.
+# A GitOpsCluster is also created per entry to register matched clusters in hub Argo CD.
 placements:
-  - name: placement-rosa-dev
-    clusterSet: rosa-platform
+  - name: placement-dev
+    clusterSet: dev
     clusterTypes:
       - dev
-  - name: placement-rosa-preprod
-    clusterSet: rosa-platform
+
+  - name: placement-preprod
+    clusterSet: preprod
     clusterTypes:
       - preprod
-  - name: placement-rosa-prod
-    clusterSet: rosa-platform
+
+  - name: placement-prod
+    clusterSet: prod
     clusterTypes:
       - prod
+
   - name: placement-hub
     clusterSet: management
     clusterTypes:
       - hub
 
-# ApplicationSets — one per cluster tier.
+# ── ApplicationSets ───────────────────────────────────────────────────────────
+# One ApplicationSet is created per entry. Each fans out the spoke-argocd-bootstrap chart
+# to every cluster matched by its placement.
+#
+# prune: true  — when a cluster label is removed, the bootstrap Application is automatically
+#                deleted. Suitable for dev and preprod where cleanup should be automatic.
+# prune: false — the bootstrap Application is LEFT in place even if the cluster label is
+#                removed. Recommended for prod to prevent accidental teardown.
+#
+# extraValues: optional key/value pairs injected into the bootstrap chart's Helm values.
+#              Use this to override defaults that cannot be derived from cluster labels
+#              (e.g. disabling GitOps installation on a hub that already has it).
 applicationSets:
-  - name: spoke-argocd-bootstrap
-    placement: placement-rosa-dev
+  - name: bootstrap-dev
+    placement: placement-dev
     requeueAfterSeconds: 180
+    prune: true   # dev: auto-prune is safe
+
+  - name: bootstrap-preprod
+    placement: placement-preprod
+    requeueAfterSeconds: 180
+    prune: true   # preprod: auto-prune enabled — validate before promoting to prod
+
+  - name: bootstrap-prod
+    placement: placement-prod
+    requeueAfterSeconds: 180
+    prune: false  # prod: NEVER auto-prune — removals require deliberate manual action
+
   - name: hub-self-management
     placement: placement-hub
     requeueAfterSeconds: 180
+    prune: true   # hub manages itself; prune is safe — removing the label stops self-management
     extraValues:
+      # Hub already has GitOps installed — skip the operator subscription
       installOpenShiftGitOps: false
+      # These cannot be derived from local-cluster metadata labels, so hardcode them here
       clusterType: hub
       clusterGroup: eng
       region: eu-west-1
 
+# ── Bootstrap chart reference ─────────────────────────────────────────────────
+# Chart path within the helmCatalogRepoURL used by all ApplicationSets above.
 spokeArgoCDBootstrap:
   chart: spoke-argocd-bootstrap
   destinationNamespace: openshift-gitops

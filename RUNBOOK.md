@@ -10,13 +10,14 @@ This document walks through standing up the full two-tier GitOps platform from s
 Hub cluster (ACM + OpenShift GitOps)
 │
 ├── hub-gitops Helm chart (installed manually once)
-│   ├── ManagedClusterSet: rosa-platform  ← spoke clusters
-│   ├── ManagedClusterSet: management     ← hub itself
+│   ├── ManagedClusterSets: dev / preprod / prod / management
 │   ├── Placements (one per tier)
 │   ├── GitOpsClusters (link placements → Argo CD)
 │   └── ApplicationSets
-│       ├── spoke-argocd-bootstrap  → installs GitOps + root app on each spoke
-│       └── hub-self-management    → installs root app on hub (GitOps already present)
+│       ├── bootstrap-dev       → installs GitOps + root app on each dev spoke
+│       ├── bootstrap-preprod   → installs GitOps + root app on each preprod spoke
+│       ├── bootstrap-prod      → installs GitOps + root app on each prod spoke
+│       └── hub-self-management → installs root app on hub (GitOps already present)
 │
 └── Root Application on hub (via hub-self-management)
     └── platform-apps chart → deploys ACS, alertmanager, operators on hub
@@ -24,6 +25,15 @@ Hub cluster (ACM + OpenShift GitOps)
 Spoke cluster (bootstrapped automatically)
 └── Root Application (deployed by spoke-argocd-bootstrap)
     └── platform-apps chart → deploys workloads defined in platform-config
+```
+
+### Config merge order (four layers, later overrides earlier)
+
+```
+default.yaml
+  → regions/<region>/region.yaml
+    → clusters/<clusterType>/common.yaml
+      → clusters/<clusterType>/<clusterGroup>/clusterdef.yaml
 ```
 
 ---
@@ -114,11 +124,11 @@ helm install hub-platform . \
 ```
 
 This creates:
-- Two `ManagedClusterSets` (`rosa-platform`, `management`)
-- Two `ManagedClusterSetBindings`
+- Four `ManagedClusterSets` (`dev`, `preprod`, `prod`, `management`)
+- Four `ManagedClusterSetBindings`
 - Four `Placements` (dev / preprod / prod / hub)
 - Four `GitOpsClusters`
-- Two `ApplicationSets` (`spoke-argocd-bootstrap`, `hub-self-management`)
+- Four `ApplicationSets` (`bootstrap-dev`, `bootstrap-preprod`, `bootstrap-prod`, `hub-self-management`)
 
 Dry-run first if you want to review:
 
@@ -144,6 +154,8 @@ oc label managedcluster local-cluster \
 
 > This must be done after Step 3 — the `management` ManagedClusterSet must exist before `local-cluster` can join it.
 
+---
+
 ### Step 5 — Verify hub self-management
 
 ```bash
@@ -154,7 +166,7 @@ oc get applicationset hub-self-management -n openshift-gitops
 oc get application platform-bootstrap-local-cluster -n openshift-gitops
 
 # platform-apps child Applications (ACS, alertmanager, operators) deploy from here
-oc get application -n platform-tools
+oc get application -n openshift-gitops
 ```
 
 ---
@@ -163,11 +175,41 @@ oc get application -n platform-tools
 
 ### Step 6 — Create a cluster definition for your spoke
 
-Add a `clusterdef.yaml` for your spoke under `platform-config/clusters/dev/<group>/<region>/`.
-Use an existing file as a template, e.g. `clusters/dev/eng/eu-west-1/clusterdef.yaml`.
+Each cluster needs exactly one `clusterdef.yaml` under `platform-config/clusters/<type>/<group>/`.
+The folder name becomes the `clusterGroup` label value.
+
+```
+platform-config/clusters/
+  dev/
+    payments/clusterdef.yaml    ← payments dev cluster
+    digital/clusterdef.yaml     ← digital dev cluster
+    mortgages/clusterdef.yaml   ← mortgages dev cluster
+  preprod/
+    payments/clusterdef.yaml    ← payments preprod cluster
+    ...
+```
+
+Copy the nearest example and edit:
 
 ```bash
-# Find the ROSA infrastructure ID (needed if enabling MachinePools later)
+# Example: new preprod cluster for the "biscuits" team
+mkdir -p platform-config/clusters/preprod/biscuits
+cp platform-config/clusters/preprod/payments/clusterdef.yaml \
+   platform-config/clusters/preprod/biscuits/clusterdef.yaml
+```
+
+Minimum fields to update in the new file:
+
+| Field | Value |
+|-------|-------|
+| `clusterGroup` | `biscuits` (matches folder name) |
+| `clusterName` | `biscuits-preprod-eu-west-1` (or your chosen name) |
+| `region` | `eu-west-1` (must match a directory under `regions/`) |
+| `stackrox.clusterName` | `biscuits-preprod` |
+| `rosa.machinePools.platform.clusterID` | fill in after cluster import (Step 7) |
+
+```bash
+# Find the ROSA infrastructure ID (needed if enabling MachinePools)
 oc get infrastructure cluster \
   -o jsonpath='{.status.infrastructureName}' \
   --context <spoke-context>
@@ -208,23 +250,43 @@ Once the spoke shows `Available=True` in ACM, apply the platform labels so the P
 
 ```bash
 oc label managedcluster <spoke-cluster-name> \
-  cluster.open-cluster-management.io/clusterset=rosa-platform \
-  platform/clusterType=dev \
-  platform/clusterGroup=eng \
+  cluster.open-cluster-management.io/clusterset=<dev|preprod|prod> \
+  platform/clusterType=<dev|preprod|prod> \
+  platform/clusterGroup=<group>        \
+  platform/region=eu-west-1            \
+  platform/version=main                \
+  --overwrite
+```
+
+**Label → folder mapping:**
+
+| Label | Must match |
+|-------|-----------|
+| `clusterset` | A `ManagedClusterSet` name: `dev`, `preprod`, or `prod` |
+| `platform/clusterType` | Same as `clusterset` value (`dev`, `preprod`, `prod`) |
+| `platform/clusterGroup` | Folder name under `clusters/<clusterType>/` (e.g. `payments`, `biscuits`) |
+| `platform/region` | Folder name under `regions/` (e.g. `eu-west-1`) |
+| `platform/version` | Git branch / tag for chart revisions (usually `main`) |
+
+**Example — biscuits preprod:**
+
+```bash
+oc label managedcluster biscuits-preprod-1 \
+  cluster.open-cluster-management.io/clusterset=preprod \
+  platform/clusterType=preprod \
+  platform/clusterGroup=biscuits \
   platform/region=eu-west-1 \
   platform/version=main \
   --overwrite
 ```
-
-> Adjust `clusterType`, `clusterGroup`, and `region` to match the `clusterdef.yaml` you created in Step 6.
 
 ---
 
 ### Step 9 — Watch the spoke rollout
 
 ```bash
-# ApplicationSet should have generated an Application for the spoke
-oc get application platform-bootstrap-<spoke-name> -n openshift-gitops -w
+# bootstrap-preprod ApplicationSet should have generated an Application for the spoke
+oc get application platform-bootstrap-biscuits-preprod-1 -n openshift-gitops -w
 ```
 
 Switch to the spoke cluster to follow the bootstrap sequence:
@@ -239,13 +301,13 @@ oc get subscription openshift-gitops-operator -n openshift-operators
 oc get application -n openshift-gitops
 
 # platform-apps child Applications deploy from the root app
-oc get application -n platform-tools
+oc get application -n openshift-gitops
 ```
 
 #### Expected sequence
 
 ```
-spoke-argocd-bootstrap ApplicationSet fires
+bootstrap-<tier> ApplicationSet fires
   → Subscription + Namespace created on spoke (sync-wave -2, -1)
   → OpenShift GitOps operator installs (~2-3 min)
   → Root Application created in openshift-gitops namespace (sync-wave 1)
@@ -255,12 +317,12 @@ spoke-argocd-bootstrap ApplicationSet fires
 
 ---
 
-## Adding a new cluster
+## Adding a new cluster (summary)
 
-1. Create its `clusterdef.yaml` in `platform-config/clusters/<type>/<group>/<region>/`
+1. Create `platform-config/clusters/<type>/<group>/clusterdef.yaml` — one folder = one cluster
 2. Commit and push `platform-config`
 3. Import the cluster into ACM (Step 7)
-4. Apply the labels (Step 8) — the `spoke-argocd-bootstrap` ApplicationSet selects it automatically within `requeueAfterSeconds` (180s)
+4. Apply the labels (Step 8) — the correct `bootstrap-<tier>` ApplicationSet selects it automatically within `requeueAfterSeconds` (180s)
 
 No changes to `hub-gitops` or any ApplicationSet are needed for a new cluster of the same type.
 
@@ -279,7 +341,7 @@ oc get managedcluster <name> -o jsonpath='{.metadata.labels}' | jq
 ```
 
 Common causes:
-- Missing or incorrect `cluster.open-cluster-management.io/clusterset` label — must match the `ManagedClusterSet` name exactly
+- Wrong `cluster.open-cluster-management.io/clusterset` label — must match the `ManagedClusterSet` name exactly (`dev`, `preprod`, `prod`, or `management`)
 - `ManagedClusterSetBinding` missing — re-run `helm upgrade hub-platform .`
 - `platform/clusterType` label value does not match any `placement.clusterTypes` entry
 
@@ -297,18 +359,17 @@ oc get catalogsource -n openshift-marketplace --context <spoke-context>
 
 ### Root Application created but child apps missing
 
-The root Application sources `platform-apps` as a Helm chart. Check that the `valueFiles` paths exist in `platform-config` for the cluster's type/group/region combination:
+The root Application sources `platform-apps` as a Helm chart. Check that the `valueFiles` paths exist in `platform-config` for the cluster's type/group combination:
 
 ```bash
 # Expected files (adjust for your cluster):
 platform-config/default.yaml
 platform-config/regions/eu-west-1/region.yaml
 platform-config/clusters/dev/common.yaml
-platform-config/clusters/dev/eng/groupdef.yaml
-platform-config/clusters/dev/eng/eu-west-1/clusterdef.yaml
+platform-config/clusters/dev/payments/clusterdef.yaml
 ```
 
-`ignoreMissingValueFiles: true` is set, so missing files are skipped — but a missing `clusterdef.yaml` means no cluster-specific overrides will apply.
+`ignoreMissingValueFiles: true` is set, so missing files are silently skipped — but a missing `clusterdef.yaml` means no cluster-specific overrides will apply. The cluster may still work but with only defaults from `common.yaml`.
 
 ### Argo CD repo credentials
 

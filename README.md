@@ -6,7 +6,7 @@ Hub-only Helm chart. Install once on the cluster that runs ACM + hub OpenShift G
 
 ## What it installs
 
-- `ManagedClusterSet` (one per entry in `clusterSets`) — `rosa-platform` for ROSA spokes, `management` for the hub itself
+- `ManagedClusterSet` (one per entry in `clusterSets`) — `dev`, `preprod`, `prod` for ROSA spokes; `management` for the hub itself
 - `ManagedClusterSetBinding` (one per set) — exposes each set to `openshift-gitops` namespace
 - `Placement` (one per entry in `placements`) — selects clusters by `platform/clusterType` label within the named clusterSet
 - `GitOpsCluster` (one per Placement) — registers matched clusters in hub Argo CD
@@ -55,23 +55,24 @@ Note: ACM `ManagedClusterSet` resources have a finalizer. Verify no managed clus
 | `global.helmCatalogRepoURL` | Source for `spoke-argocd-bootstrap` chart |
 | `global.platformAppsRepoURL` | Passed into bootstrap chart (root app source) |
 | `global.platformConfigRepoURL` | Passed into bootstrap chart (config source) |
-| `clusterSets` | List of `{name}` — one `ManagedClusterSet` + `ManagedClusterSetBinding` per entry |
+| `clusterSets` | List of `{name}` — one `ManagedClusterSet` + `ManagedClusterSetBinding` per entry. Sets: `dev`, `preprod`, `prod`, `management` |
 | `placements` | List of `{name, clusterSet, clusterTypes[]}` — one `Placement` + `GitOpsCluster` per entry |
-| `applicationSets` | List of `{name, placement, requeueAfterSeconds, extraValues?}` — one `ApplicationSet` per entry |
-| `applicationSets[].extraValues` | Optional key/value pairs merged into the bootstrap chart's helm values (e.g. `installOpenShiftGitOps: false` for the hub) |
+| `applicationSets` | List of `{name, placement, requeueAfterSeconds, prune, extraValues?}` — one `ApplicationSet` per entry |
+| `applicationSets[].prune` | `true` = bootstrap Application is deleted when cluster label is removed. Default `false`. Set `false` for prod to prevent accidental teardown |
+| `applicationSets[].extraValues` | Optional key/value pairs merged into the bootstrap chart's Helm values (e.g. `installOpenShiftGitOps: false` for the hub) |
 
 ## Required managed cluster labels
 
 ### Spoke clusters
 
-Apply after import so the ApplicationSet starts selecting them:
+Apply after import so the correct ApplicationSet starts selecting the cluster:
 
 ```bash
 oc label managedcluster <name> \
-  cluster.open-cluster-management.io/clusterset=rosa-platform \
-  platform/clusterType=dev \
-  platform/clusterGroup=<group> \
-  platform/region=<region> \
+  cluster.open-cluster-management.io/clusterset=<dev|preprod|prod> \
+  platform/clusterType=<dev|preprod|prod> \
+  platform/clusterGroup=<payments|digital|mortgages> \
+  platform/region=eu-west-1 \
   platform/version=main \
   --overwrite
 ```
@@ -88,9 +89,22 @@ oc label managedcluster local-cluster \
   --overwrite
 ```
 
-## Adding a new environment tier (e.g. preprod bootstrap)
+## Sync and prune behaviour
 
-1. Add an entry to `applicationSets` in `values.yaml` pointing at the appropriate placement.
+Each `ApplicationSet` in `values.yaml` has `automated.selfHeal: true` (always on) and a configurable `prune` toggle:
+
+| Tier | Default `prune` | Rationale |
+|------|----------------|-----------|
+| `bootstrap-dev` | `true` | Clean up stale resources automatically |
+| `bootstrap-preprod` | `true` | Mirror dev behaviour for realism |
+| `bootstrap-prod` | `false` | Never auto-delete prod workloads — manual action required |
+| `hub-self-management` | `true` | Hub manages itself; removing the label is intentional |
+
+To override: edit `applicationSets[].prune` in `values.yaml` and run `helm upgrade`.
+
+## Adding a new environment tier (e.g. staging)
+
+1. Add a new entry to `clusterSets`, `placements`, and `applicationSets` in `values.yaml`.
 2. Run `helm upgrade hub-platform . --namespace openshift-gitops`.
 
 ## Local render (dry-run / review before installing)
