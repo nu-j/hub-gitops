@@ -315,6 +315,23 @@ bootstrap-<tier> ApplicationSet fires
   → Child Applications sync their workloads
 ```
 
+Once all Applications are `Synced / Healthy`, verify the merged config that was applied to the spoke:
+
+```bash
+# Inspect the fully merged platform-config values in effect on this cluster.
+# This ConfigMap is written by the platform-config-snapshot Application on every sync.
+oc get configmap platform-config-snapshot -n openshift-gitops \
+  -o jsonpath='{.data.values\.yaml}' | yq
+```
+
+Run the same command on the hub to compare the hub's effective config:
+
+```bash
+oc get configmap platform-config-snapshot -n openshift-gitops \
+  -o jsonpath='{.data.values\.yaml}' \
+  --context <hub-context> | yq
+```
+
 ---
 
 ## Adding a new cluster (summary)
@@ -370,6 +387,19 @@ platform-config/clusters/dev/payments/clusterdef.yaml
 ```
 
 `ignoreMissingValueFiles: true` is set, so missing files are silently skipped — but a missing `clusterdef.yaml` means no cluster-specific overrides will apply. The cluster may still work but with only defaults from `common.yaml`.
+
+If the cluster is up, the fastest way to see which values were actually merged is the config snapshot ConfigMap:
+
+```bash
+oc get configmap platform-config-snapshot -n openshift-gitops \
+  -o jsonpath='{.data.values\.yaml}' | yq '.platform.argocdApps'
+```
+
+If `platform-config-snapshot` itself is missing, it means either the Application has not synced yet or `platformConfigSnapshot.enabled` is `false` in the merged values — check with:
+
+```bash
+oc get application platform-config-snapshot -n openshift-gitops
+```
 
 ### Argo CD repo credentials
 
