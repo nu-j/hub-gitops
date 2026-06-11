@@ -430,3 +430,46 @@ oc label secret platform-config-repo \
 ```
 
 Repeat for each of the four repos.
+
+---
+
+## Forcing ApplicationSet reconciliation
+
+ApplicationSets re-evaluate on a timer (`requeueAfterSeconds: 180`). To trigger an immediate reconcile without waiting:
+
+```bash
+# Kick a specific ApplicationSet — fastest option
+oc annotate applicationset bootstrap-dev \
+  argocd.argoproj.io/refresh=normal \
+  -n openshift-gitops --overwrite
+
+# After pushing changes to hub-gitops or platform-apps, hard-refresh the hub root app
+# to force a cache-busting git fetch and re-render of all ApplicationSet resources
+oc annotate application eng-hub-aoa \
+  argocd.argoproj.io/refresh=hard \
+  -n openshift-gitops --overwrite
+
+# Force-refresh a specific bootstrap Application (e.g. after re-labelling a cluster)
+oc annotate application platform-bootstrap-digital \
+  argocd.argoproj.io/refresh=hard \
+  -n openshift-gitops --overwrite
+```
+
+Via the Argo CD CLI:
+
+```bash
+# Refresh an ApplicationSet
+argocd appset get bootstrap-dev --refresh
+
+# Hard-refresh a generated Application
+argocd app get platform-bootstrap-digital --hard-refresh
+```
+
+**When to use each:**
+
+| Situation | Command |
+|-----------|---------|
+| Cluster labelled but ApplicationSet hasn't fired yet | `annotate applicationset ... refresh=normal` |
+| `hub-gitops` values changed (`helm upgrade` already run) | `annotate application eng-hub-aoa refresh=hard` |
+| Bootstrap Application exists but has stale rendered values | `annotate application platform-bootstrap-<name> refresh=hard` |
+| Spoke root Application not picking up platform-config changes | Sync the spoke root Application directly from the spoke Argo CD UI |

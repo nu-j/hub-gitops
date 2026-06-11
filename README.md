@@ -48,7 +48,7 @@ helm upgrade hub-platform . --namespace openshift-gitops
 > - Changing `clusterType`, `region`, `prune`, or `requeueAfterSeconds` on an ApplicationSet
 > - Updating any of the three `global.*RepoURL` values
 >
-> After upgrading, the updated `ApplicationSet` resources are re-applied immediately. Any in-flight `Application` objects they manage (e.g. `platform-bootstrap-digital`) will be regenerated on the next ApplicationSet reconcile cycle (`requeueAfterSeconds`, default 180s) or you can trigger an immediate refresh from the Argo CD UI.
+> After upgrading, the updated `ApplicationSet` resources are re-applied immediately. Any in-flight `Application` objects they manage (e.g. `platform-bootstrap-digital`) will be regenerated on the next ApplicationSet reconcile cycle (`requeueAfterSeconds`, default 180s) — or trigger an immediate refresh using the commands in [Forcing ApplicationSet reconciliation](RUNBOOK.md#forcing-applicationset-reconciliation) in the runbook.
 
 ## Uninstall
 
