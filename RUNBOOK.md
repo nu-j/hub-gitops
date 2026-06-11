@@ -246,7 +246,12 @@ Follow the import instructions that ACM surfaces (it will print a `kubectl` comm
 
 ### Step 8 — Label the spoke ManagedCluster
 
-Once the spoke shows `Available=True` in ACM, apply the platform labels so the Placement can select it:
+Two distinct categories of label are applied here — understanding the difference matters:
+
+| Label | Purpose | Required? |
+|-------|---------|-----------|
+| `cluster.open-cluster-management.io/clusterset` | **Functional** — ACM uses this to match the cluster to a `Placement`, which triggers the correct `bootstrap-<tier>` ApplicationSet | Yes — nothing fires without it |
+| `platform/clusterType`, `platform/clusterGroup`, `platform/region` | **Informational** — for `oc describe`, ACM console filtering, and visual inspection on-cluster. These are NOT used by the ApplicationSet to resolve platform-config paths (that is handled by `hub-gitops/values.yaml` in Git) | Recommended for operability |
 
 ```bash
 oc label managedcluster <spoke-cluster-name> \
@@ -258,23 +263,25 @@ oc label managedcluster <spoke-cluster-name> \
   --overwrite
 ```
 
+> **Convention**: the ManagedCluster `name` must equal the `clusterGroup` (e.g. a cluster named `digital` resolves `clusters/dev/digital/clusterdef.yaml`). The `name` is set at import and cannot change without re-importing.
+
 **Label → folder mapping:**
 
 | Label | Must match |
 |-------|-----------|
 | `clusterset` | A `ManagedClusterSet` name: `dev`, `preprod`, or `prod` |
-| `platform/clusterType` | Same as `clusterset` value (`dev`, `preprod`, `prod`) |
-| `platform/clusterGroup` | Folder name under `clusters/<clusterType>/` (e.g. `payments`, `biscuits`) |
-| `platform/region` | Folder name under `regions/` (e.g. `eu-west-1`) |
-| `platform/version` | Git branch / tag for chart revisions (usually `main`) |
+| `platform/clusterType` | Informational — matches the `clusterset` value |
+| `platform/clusterGroup` | Informational — matches the ManagedCluster `name` and the folder under `clusters/<clusterType>/` |
+| `platform/region` | Informational — matches a directory under `regions/` |
+| `platform/version` | Informational — Git branch / tag used when reading platform-config |
 
-**Example — biscuits preprod:**
+**Example — digital dev:**
 
 ```bash
-oc label managedcluster biscuits-preprod-1 \
-  cluster.open-cluster-management.io/clusterset=preprod \
-  platform/clusterType=preprod \
-  platform/clusterGroup=biscuits \
+oc label managedcluster digital \
+  cluster.open-cluster-management.io/clusterset=dev \
+  platform/clusterType=dev \
+  platform/clusterGroup=digital \
   platform/region=eu-west-1 \
   platform/version=main \
   --overwrite
@@ -336,12 +343,12 @@ oc get configmap platform-config-snapshot -n openshift-gitops \
 
 ## Adding a new cluster (summary)
 
-1. Create `platform-config/clusters/<type>/<group>/clusterdef.yaml` — one folder = one cluster
+1. Create `platform-config/clusters/<type>/<group>/clusterdef.yaml` — folder name must match the ManagedCluster name you will use at import
 2. Commit and push `platform-config`
 3. Import the cluster into ACM (Step 7)
-4. Apply the labels (Step 8) — the correct `bootstrap-<tier>` ApplicationSet selects it automatically within `requeueAfterSeconds` (180s)
+4. Apply the `clusterset` label (Step 8) — the correct `bootstrap-<tier>` ApplicationSet selects it automatically within `requeueAfterSeconds` (180s)
 
-No changes to `hub-gitops` or any ApplicationSet are needed for a new cluster of the same type.
+No changes to `hub-gitops` or any ApplicationSet are needed for a new cluster of the same type and region.
 
 ---
 
@@ -353,12 +360,12 @@ No changes to `hub-gitops` or any ApplicationSet are needed for a new cluster of
 # Check the Placement is binding to clusters
 oc get placementdecision -n openshift-gitops
 
-# Verify labels on the ManagedCluster
+# Verify the clusterset label on the ManagedCluster (this is the functional trigger)
 oc get managedcluster <name> -o jsonpath='{.metadata.labels}' | jq
 ```
 
 Common causes:
-- Wrong `cluster.open-cluster-management.io/clusterset` label — must match the `ManagedClusterSet` name exactly (`dev`, `preprod`, `prod`, or `management`)
+- Wrong `cluster.open-cluster-management.io/clusterset` label — must match the `ManagedClusterSet` name exactly (`dev`, `preprod`, `prod`, or `management`). This is the only label the ApplicationSet depends on functionally.
 - `ManagedClusterSetBinding` missing — re-run `helm upgrade hub-platform .`
 - `platform/clusterType` label value does not match any `placement.clusterTypes` entry
 

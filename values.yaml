@@ -60,30 +60,39 @@ placements:
 applicationSets:
   - name: bootstrap-dev
     placement: placement-dev
+    # clusterType and region are baked into the ApplicationSet — all clusters onboarded here
+    # are provably dev in eu-west-1. Change requires a Git commit and PR.
+    clusterType: dev
+    region: eu-west-1
     requeueAfterSeconds: 180
     prune: true   # dev: auto-prune is safe
 
   - name: bootstrap-preprod
     placement: placement-preprod
+    clusterType: preprod
+    region: eu-west-1
     requeueAfterSeconds: 180
     prune: true   # preprod: auto-prune enabled — validate before promoting to prod
 
   - name: bootstrap-prod
     placement: placement-prod
+    clusterType: prod
+    region: eu-west-1
     requeueAfterSeconds: 180
     prune: false  # prod: NEVER auto-prune — removals require deliberate manual action
 
   - name: hub-self-management
     placement: placement-hub
+    clusterType: hub
+    region: eu-west-1
     requeueAfterSeconds: 180
     prune: true   # hub manages itself; prune is safe — removing the label stops self-management
     extraValues:
       # Hub already has GitOps installed — skip the operator subscription
       installOpenShiftGitOps: false
-      # These cannot be derived from local-cluster metadata labels, so hardcode them here
-      clusterType: hub
+      # ManagedCluster name for the hub is "local-cluster", not "eng".
+      # Override clusterGroup explicitly so the correct clusterdef.yaml path is resolved.
       clusterGroup: eng
-      region: eu-west-1
 
 # ── Bootstrap chart reference ─────────────────────────────────────────────────
 # Chart path within the helmCatalogRepoURL used by all ApplicationSets above.

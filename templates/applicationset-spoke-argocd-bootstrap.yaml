@@ -26,20 +26,25 @@ spec:
       source:
         repoURL: {{ $.Values.global.helmCatalogRepoURL | quote }}
         path: {{ $.Values.spokeArgoCDBootstrap.chart }}
-        # platform/version label on the ManagedCluster controls which Git revision is deployed.
-        # Falls back to "main" for local-cluster (hub) which has no metadata labels in the generator.
-        targetRevision: '{{`{{if .metadata}}{{index .metadata.labels "platform/version" | default "main"}}{{else}}main{{end}}`}}'
+        # All ApplicationSets use "main" as the chart revision.
+        # Pin to a specific tag per ApplicationSet via targetRevision in values.yaml if needed.
+        targetRevision: main
         helm:
           values: |
             org: {{ $.Values.org }}
             clusterName: {{`{{.name}}`}}
-            clusterType: {{`{{if .metadata}}{{index .metadata.labels "platform/clusterType"}}{{end}}`}}
-            clusterGroup: {{`{{if .metadata}}{{index .metadata.labels "platform/clusterGroup"}}{{end}}`}}
-            region: {{`{{if .metadata}}{{index .metadata.labels "platform/region"}}{{end}}`}}
+            # clusterType and region are sourced from values.yaml (Git) — same for every cluster
+            # in this ApplicationSet. This makes the mapping auditable and avoids relying on
+            # ManagedCluster label propagation to Argo CD cluster secrets (which is not guaranteed).
+            clusterType: {{ .clusterType }}
+            # clusterGroup is derived from the ManagedCluster name — always available in the
+            # generator context as .name. Convention: ManagedCluster name == clusterGroup.
+            clusterGroup: {{`{{.name}}`}}
+            region: {{ .region }}
             platformAppsRepoURL: {{ $.Values.global.platformAppsRepoURL }}
             platformConfigRepoURL: {{ $.Values.global.platformConfigRepoURL }}
             platform:
-              version: {{`{{if .metadata}}{{index .metadata.labels "platform/version" | default "main"}}{{else}}main{{end}}`}}
+              version: main
             {{- range $k, $v := .extraValues }}
             {{ $k }}: {{ $v }}
             {{- end }}
