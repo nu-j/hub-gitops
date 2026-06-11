@@ -40,6 +40,16 @@ helm install hub-platform . \
 helm upgrade hub-platform . --namespace openshift-gitops
 ```
 
+> **Important — this chart is NOT managed by Argo CD.**
+> Unlike spoke workloads, `hub-gitops` is a manually installed Helm release. Changes to `values.yaml` or any template (ApplicationSets, Placements, ClusterSets) are **not picked up automatically** when you push to Git. You must run `helm upgrade` explicitly after every change.
+>
+> Common changes that require an upgrade:
+> - Adding or removing an entry in `applicationSets`, `clusterSets`, or `placements`
+> - Changing `clusterType`, `region`, `prune`, or `requeueAfterSeconds` on an ApplicationSet
+> - Updating any of the three `global.*RepoURL` values
+>
+> After upgrading, the updated `ApplicationSet` resources are re-applied immediately. Any in-flight `Application` objects they manage (e.g. `platform-bootstrap-digital`) will be regenerated on the next ApplicationSet reconcile cycle (`requeueAfterSeconds`, default 180s) or you can trigger an immediate refresh from the Argo CD UI.
+
 ## Uninstall
 
 ```bash
