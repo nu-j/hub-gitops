@@ -1,13 +1,13 @@
 # Platform GitOps — End-to-End Runbook
 
-This document walks through standing up the full two-tier GitOps platform from scratch: a hub ROSA cluster running ACM and OpenShift GitOps, and one or more spoke ROSA clusters that are bootstrapped and self-managed automatically.
+This document walks through standing up the full two-tier GitOps platform from scratch: a management ROSA cluster running ACM and OpenShift GitOps, and one or more spoke ROSA clusters that are bootstrapped and self-managed automatically.
 
 ---
 
 ## Architecture overview
 
 ```
-Hub cluster (ACM + OpenShift GitOps)
+Management cluster (ACM + OpenShift GitOps)
 │
 ├── hub-gitops Helm chart (installed manually once)
 │   ├── ManagedClusterSets: dev / preprod / prod / management
@@ -17,10 +17,10 @@ Hub cluster (ACM + OpenShift GitOps)
 │       ├── bootstrap-dev       → installs GitOps + root app on each dev spoke
 │       ├── bootstrap-preprod   → installs GitOps + root app on each preprod spoke
 │       ├── bootstrap-prod      → installs GitOps + root app on each prod spoke
-│       └── hub-self-management → installs root app on hub (GitOps already present)
+│       └── hub-self-management → installs root app on management cluster (GitOps already present)
 │
-└── Root Application on hub (via hub-self-management)
-    └── platform-apps chart → deploys ACS, alertmanager, operators on hub
+└── Root Application on management cluster (via hub-self-management)
+    └── platform-apps chart → deploys ACS, alertmanager, operators on management cluster
 
 Spoke cluster (bootstrapped automatically)
 └── Root Application (deployed by spoke-argocd-bootstrap)
@@ -45,13 +45,13 @@ default.yaml
 | `oc` CLI | Logged in to both clusters |
 | `helm` CLI | v3.x |
 | `git` CLI | |
-| Hub ROSA cluster | ACM operator and OpenShift GitOps operator already installed |
+| Hub management ROSA cluster | ACM operator and OpenShift GitOps operator already installed |
 | Spoke ROSA cluster | Untouched — GitOps will be installed by the bootstrap |
 | 4 GitHub repos created | `hub-gitops`, `platform-apps`, `platform-config`, `helm-catalog` |
 
 ---
 
-## Part 1 — Hub setup
+## Part 1 — Management cluster setup
 
 ### Step 1 — Push the repos to GitHub
 
@@ -113,10 +113,10 @@ Commit and push both changes after editing.
 
 ### Step 3 — Install the hub-gitops Helm chart
 
-Log in to the hub and install from a local checkout of `hub-gitops/`:
+Log in to the management cluster and install from a local checkout of `hub-gitops/`:
 
 ```bash
-oc login <hub-api-url> --token=<hub-token>
+oc login <management-api-url> --token=<management-token>
 
 helm install hub-platform . \
   --namespace openshift-gitops \
@@ -126,7 +126,7 @@ helm install hub-platform . \
 This creates:
 - Four `ManagedClusterSets` (`dev`, `preprod`, `prod`, `management`)
 - Four `ManagedClusterSetBindings`
-- Four `Placements` (dev / preprod / prod / hub)
+- Four `Placements` (dev / preprod / prod / management)
 - Four `GitOpsClusters`
 - Four `ApplicationSets` (`bootstrap-dev`, `bootstrap-preprod`, `bootstrap-prod`, `hub-self-management`)
 
@@ -138,15 +138,15 @@ helm template hub-platform . --namespace openshift-gitops
 
 ---
 
-### Step 4 — Label local-cluster for hub self-management
+### Step 4 — Label local-cluster for management self-management
 
-This triggers the `hub-self-management` ApplicationSet to deploy the root app-of-apps on the hub itself:
+This triggers the `hub-self-management` ApplicationSet to deploy the root app-of-apps on the management cluster itself:
 
 ```bash
 oc label managedcluster local-cluster \
   cluster.open-cluster-management.io/clusterset=management \
-  platform/clusterType=hub \
-  platform/clusterGroup=eng \
+  platform/clusterType=management \
+  platform/clusterGroup=eng-hub \
   platform/region=eu-west-1 \
   platform/version=main \
   --overwrite
@@ -156,13 +156,13 @@ oc label managedcluster local-cluster \
 
 ---
 
-### Step 5 — Verify hub self-management
+### Step 5 — Verify management self-management
 
 ```bash
 # hub-self-management ApplicationSet should have generated one Application
 oc get applicationset hub-self-management -n openshift-gitops
 
-# Root Application for the hub should be visible
+# Root Application for the management cluster should be visible
 oc get application platform-bootstrap-local-cluster -n openshift-gitops
 
 # platform-apps child Applications (ACS, alertmanager, operators) deploy from here
@@ -331,12 +331,12 @@ oc get configmap platform-config-snapshot -n openshift-gitops \
   -o jsonpath='{.data.values\.yaml}' | yq
 ```
 
-Run the same command on the hub to compare the hub's effective config:
+Run the same command on the management cluster to compare its effective config:
 
 ```bash
 oc get configmap platform-config-snapshot -n openshift-gitops \
   -o jsonpath='{.data.values\.yaml}' \
-  --context <hub-context> | yq
+  --context <management-context> | yq
 ```
 
 ---
@@ -410,7 +410,7 @@ oc get application platform-config-snapshot -n openshift-gitops
 
 ### Argo CD repo credentials
 
-If your GitHub repos are private, add repository credentials in the hub Argo CD before installing:
+If your GitHub repos are private, add repository credentials in the management cluster's Argo CD before installing:
 
 ```bash
 # Via Argo CD CLI

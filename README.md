@@ -1,12 +1,12 @@
 # hub-gitops
 
-Hub-only Helm chart. Install once on the cluster that runs ACM + hub OpenShift GitOps. After install, Argo CD manages the rest automatically.
+Management-cluster-only Helm chart. Install once on the cluster that runs ACM + hub OpenShift GitOps. After install, Argo CD manages the rest automatically.
 
 > For a full end-to-end setup guide see [RUNBOOK.md](RUNBOOK.md).
 
 ## What it installs
 
-- `ManagedClusterSet` (one per entry in `clusterSets`) — `dev`, `preprod`, `prod` for ROSA spokes; `management` for the hub itself
+- `ManagedClusterSet` (one per entry in `clusterSets`) — `dev`, `preprod`, `prod` for ROSA spokes; `management` for the management cluster (local-cluster)
 - `ManagedClusterSetBinding` (one per set) — exposes each set to `openshift-gitops` namespace
 - `Placement` (one per entry in `placements`) — selects clusters by `platform/clusterType` label within the named clusterSet
 - `GitOpsCluster` (one per Placement) — registers matched clusters in hub Argo CD
@@ -87,13 +87,13 @@ oc label managedcluster <name> \
   --overwrite
 ```
 
-### Hub cluster (self-management)
+### Management cluster (self-management)
 
 ```bash
 oc label managedcluster local-cluster \
   cluster.open-cluster-management.io/clusterset=management \
-  platform/clusterType=hub \
-  platform/clusterGroup=eng \
+  platform/clusterType=management \
+  platform/clusterGroup=eng-hub \
   platform/region=eu-west-1 \
   platform/version=main \
   --overwrite
@@ -108,7 +108,7 @@ Each `ApplicationSet` in `values.yaml` has `automated.selfHeal: true` (always on
 | `bootstrap-dev` | `true` | Clean up stale resources automatically |
 | `bootstrap-preprod` | `true` | Mirror dev behaviour for realism |
 | `bootstrap-prod` | `false` | Never auto-delete prod workloads — manual action required |
-| `hub-self-management` | `true` | Hub manages itself; removing the label is intentional |
+| `hub-self-management` | `true` | Management cluster manages itself; removing the label is intentional |
 
 To override: edit `applicationSets[].prune` in `values.yaml` and run `helm upgrade`.
 

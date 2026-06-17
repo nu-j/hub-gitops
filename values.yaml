@@ -40,10 +40,10 @@ placements:
     clusterTypes:
       - prod
 
-  - name: placement-hub
+  - name: placement-management
     clusterSet: management
     clusterTypes:
-      - hub
+      - management
 
 # ── ApplicationSets ───────────────────────────────────────────────────────────
 # One ApplicationSet is created per entry. Each fans out the spoke-argocd-bootstrap chart
@@ -82,17 +82,17 @@ applicationSets:
     prune: false  # prod: NEVER auto-prune — removals require deliberate manual action
 
   - name: hub-self-management
-    placement: placement-hub
-    clusterType: hub
+    placement: placement-management
+    clusterType: management
     region: eu-west-1
     requeueAfterSeconds: 180
-    prune: true   # hub manages itself; prune is safe — removing the label stops self-management
+    prune: true   # management cluster manages itself; prune is safe — removing the label stops self-management
     extraValues:
-      # Hub already has GitOps installed — skip the operator subscription
+      # Management cluster already has GitOps installed — skip the operator subscription
       installOpenShiftGitOps: false
-      # ManagedCluster name for the hub is "local-cluster", not "eng".
+      # ManagedCluster name for the management cluster is "local-cluster", not "eng-hub".
       # Override clusterGroup explicitly so the correct clusterdef.yaml path is resolved.
-      clusterGroup: eng
+      clusterGroup: eng-hub
 
 # ── Bootstrap chart reference ─────────────────────────────────────────────────
 # Chart path within the helmCatalogRepoURL used by all ApplicationSets above.

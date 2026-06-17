@@ -1,22 +1,22 @@
 # Architecture Diagrams
 
-Reference diagrams for the two-tier hub-spoke GitOps platform.
+Reference diagrams for the two-tier management-spoke GitOps platform.
 See [RUNBOOK.md](RUNBOOK.md) for operational procedures and [README.md](README.md) for chart reference.
 
 ---
 
 ## Diagram 1 — The two-tier push/pull model
 
-The hub **pushes** a bootstrap Application to each spoke via ACM and ApplicationSets.
+The management cluster **pushes** a bootstrap Application to each spoke via ACM and ApplicationSets.
 The spoke's own Argo CD then **pulls** all further configuration independently.
 
 ```mermaid
 flowchart TD
-    subgraph hub [Hub Cluster]
+    subgraph hub [Management Cluster]
         ACM["ACM Placement\nplacement-dev"]
         AppSet["ApplicationSet\nbootstrap-dev\nhub-gitops/templates/\napplicationset-spoke-argocd-bootstrap.yaml"]
         HubArgoCD["Hub Argo CD\nopenshift-gitops"]
-        BootstrapApp["Application\nplatform-bootstrap-digital\n(lives on HUB, targets SPOKE)"]
+        BootstrapApp["Application\nplatform-bootstrap-digital\n(lives on MANAGEMENT, targets SPOKE)"]
     end
 
     subgraph git [Git Repositories]
@@ -116,7 +116,7 @@ flowchart TD
     end
 
     subgraph appsTpl [platform-apps.git]
-        GuardrailsTpl["templates/spoke/\ncluster-guardrails-app.yaml\n→ Application cluster-guardrails\nif clusterGuardrails.enabled\n   AND clusterType != hub"]
+        GuardrailsTpl["templates/spoke/\ncluster-guardrails-app.yaml\n→ Application cluster-guardrails\nif clusterGuardrails.enabled\n   AND clusterType != management"]
     end
 
     subgraph guardChart [helm-catalog/cluster-guardrails]
@@ -158,15 +158,15 @@ flowchart LR
 
 ## Key concepts
 
-**Push model (hub → spoke)**
-The hub cluster is the only entity that writes to spokes at bootstrap time.
+**Push model (management → spoke)**
+The management cluster is the only entity that writes to spokes at bootstrap time.
 ACM Placement selects clusters; the ApplicationSet fans out one bootstrap Application per matched cluster.
 The platform team controls which clusters are bootstrapped by managing `oc label managedcluster`.
 
 **Pull model (spoke → Git)**
 After bootstrap, each spoke's Argo CD polls Git directly.
-The hub plays no further role in managing spoke application state.
-This means a spoke continues to function correctly even if the hub is unavailable.
+The management cluster plays no further role in managing spoke application state.
+This means a spoke continues to function correctly even if the management cluster is unavailable.
 
 **Four-layer config merge**
 ```
