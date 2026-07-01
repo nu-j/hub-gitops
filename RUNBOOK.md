@@ -473,3 +473,197 @@ argocd app get platform-bootstrap-digital --hard-refresh
 | `hub-gitops` values changed (`helm upgrade` already run) | `annotate application eng-hub-aoa refresh=hard` |
 | Bootstrap Application exists but has stale rendered values | `annotate application platform-bootstrap-<name> refresh=hard` |
 | Spoke root Application not picking up platform-config changes | Sync the spoke root Application directly from the spoke Argo CD UI |
+
+---
+
+## Part 3 — Team self-service onboarding
+
+Each team on a spoke cluster gets their own isolated Argo CD instance, scoped to their namespaces.
+The platform team registers the team in `platform-config`; the team manages all applications
+themselves from that point.
+
+### How it works
+
+```
+platform-config/clusters/dev/digital/clusterdef.yaml
+  teams:
+    my-team:
+      gitopsRepoURL: https://github.com/YOUR_ORG/my-team-gitops.git
+        │
+        ▼
+platform-apps (spoke root app) renders team-argocd-app.yaml
+  → Application: team-argocd-my-team (in openshift-gitops)
+        │
+        ▼
+helm-catalog/team-argocd deploys to spoke:
+  wave -2  Namespace: my-team-gitops
+  wave -1  ClusterRoleBinding: team SA can create namespaces
+  wave  0  ArgoCD CR: operator provisions team ArgoCD stack
+  wave  1  AppProject: restricts team to my-team-* namespaces
+  wave  2  Application: my-team-root → my-team-gitops.git
+        │
+        ▼
+Team ArgoCD reconciles my-team-root
+  → reads my-team-gitops.git/values.yaml
+  → generates child Applications (ubiquitous-journey, pet-battle/test, pet-battle/stage)
+        │
+        ▼
+Team's bootstrap Application deploys helm-catalog/bootstrap-project
+  → creates my-team-tools, my-team-pet-battle-dev, my-team-pet-battle-test, my-team-pet-battle-stage
+  → each namespace labelled: argocd.argoproj.io/managed-by: my-team-gitops
+  → OpenShift GitOps operator auto-grants team ArgoCD SA deploy rights in each namespace
+```
+
+### Step 10 — Register the team in platform-config
+
+Add the team to the relevant cluster's `clusterdef.yaml`. The key is the team name — it drives
+all derived names (`<team>-gitops` namespace, `<team>-*` AppProject destinations):
+
+```bash
+# Edit platform-config/clusters/dev/digital/clusterdef.yaml
+```
+
+```yaml
+teams:
+  my-team:
+    gitopsRepoURL: https://github.com/YOUR_ORG/my-team-gitops.git
+    targetRevision: main
+    # adGroupName: MY_TEAM_AD_GROUP    # optional: grants team UI access to their ArgoCD
+```
+
+`teams` is a **map** — entries at `common.yaml` and `clusterdef.yaml` layers are merged
+together, so a team defined at the environment level coexists with cluster-specific teams.
+
+Commit and push `platform-config`. The spoke root Application will pick up the new entry
+on its next sync (or force it with a hard refresh — see Forcing ApplicationSet reconciliation).
+
+---
+
+### Step 11 — Verify team provisioning
+
+```bash
+# On the spoke cluster — platform ArgoCD should have created the team Application
+oc get application team-argocd-my-team -n openshift-gitops
+
+# Team ArgoCD namespace should exist
+oc get namespace my-team-gitops
+
+# Team ArgoCD instance should be provisioned by the operator (~2-3 min after namespace appears)
+oc get argocd my-team-gitops -n my-team-gitops
+
+# Root Application should appear once the team ArgoCD is ready
+oc get application my-team-root -n my-team-gitops
+
+# All Applications generated from the team's values.yaml
+oc get application -n my-team-gitops
+```
+
+---
+
+### Step 12 — Verify team namespace access
+
+Once the team's bootstrap Application has synced, confirm the namespaces are created
+and that the team ArgoCD SA has access to them:
+
+```bash
+# Namespaces created by bootstrap-project (my-team-tools + system × env)
+oc get namespace -l platform/team=my-team
+
+# Confirm the managed-by label is present on each namespace
+oc get namespace my-team-tools -o jsonpath='{.metadata.labels}' | jq
+
+# Operator-created RoleBinding granting team SA deploy rights (auto-created from label)
+oc get rolebinding -n my-team-tools | grep argocd
+```
+
+---
+
+### Adding a new system for an existing team
+
+The team commits to their own `my-team-gitops` repo — **no platform team action required**.
+
+In `my-team-gitops/ubiquitous-journey/values-tooling.yaml`, the team adds to the `systems` list:
+
+```yaml
+systems:
+  - name: pet-battle
+    envs: [dev, test, stage]
+    operatorgroup: true
+  - name: tournament-service      # ← new system
+    envs: [dev, test]
+    operatorgroup: false
+```
+
+This generates `my-team-tournament-service-dev` and `my-team-tournament-service-test`
+automatically on the next bootstrap Application sync, with the `managed-by` label applied
+so the team ArgoCD SA gains deploy rights immediately.
+
+---
+
+### Removing a team
+
+1. Remove the team entry from `clusterdef.yaml` and push
+2. The platform ArgoCD will prune `team-argocd-my-team` Application
+3. The `my-team-gitops` namespace and its ArgoCD instance are deleted
+4. Team namespaces (`my-team-*`) are **not** automatically deleted — they were created
+   by the team's own ArgoCD and must be cleaned up manually:
+
+```bash
+# Review what will be deleted
+oc get namespace -l platform/team=my-team
+
+# Delete when confirmed safe
+oc delete namespace -l platform/team=my-team
+```
+
+---
+
+### Troubleshooting — team ArgoCD
+
+**Team ArgoCD not provisioned after namespace appears**
+
+The OpenShift GitOps operator must be configured to watch namespaces beyond `openshift-gitops`.
+Check the operator is running the required version (1.10+ recommended) and the namespace has
+the correct label:
+
+```bash
+oc get namespace my-team-gitops -o jsonpath='{.metadata.labels}' | jq \
+  '."argocd.argoproj.io/managed-by-cluster-argocd"'
+# Expected: "openshift-gitops"
+```
+
+If the label is present but no ArgoCD CR was provisioned, check operator logs:
+
+```bash
+oc logs -n openshift-gitops \
+  deploy/openshift-gitops-operator-controller-manager \
+  --tail=50
+```
+
+**Team Applications stuck in Unknown / Missing**
+
+The team ArgoCD SA needs the ClusterRoleBinding created by `helm-catalog/team-argocd`.
+Verify it exists:
+
+```bash
+oc get clusterrolebinding team-my-team-argocd-namespace-manager
+```
+
+If missing, force a re-sync of the `team-argocd-my-team` Application from the platform ArgoCD.
+
+**Team can't deploy into a namespace**
+
+Check the `managed-by` label on the namespace and whether the operator created a RoleBinding:
+
+```bash
+# Label must be present
+oc get namespace my-team-pet-battle-dev \
+  -o jsonpath='{.metadata.labels.argocd\.argoproj\.io/managed-by}'
+# Expected: my-team-gitops
+
+# Operator should have created this RoleBinding automatically
+oc get rolebinding -n my-team-pet-battle-dev | grep my-team-gitops
+```
+
+If the label is missing, the team's `bootstrap-project` Application did not sync correctly.
+Check `oc get application bootstrap -n my-team-gitops` and review sync errors.
