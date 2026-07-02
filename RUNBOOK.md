@@ -315,12 +315,15 @@ oc get application -n openshift-gitops
 
 ```
 bootstrap-<tier> ApplicationSet fires
-  → Subscription + Namespace created on spoke (sync-wave -2, -1)
+  → Namespace + Subscription applied to spoke (sync-wave -2, -1)
+  → Root Application apply fails on first run: ArgoCD CRD not yet registered (expected)
   → OpenShift GitOps operator installs (~2-3 min)
-  → Root Application created in openshift-gitops namespace (sync-wave 1)
+  → selfHeal retries sync automatically → Root Application applied (sync-wave 1)
   → platform-apps Helm chart renders child Applications
   → Child Applications sync their workloads
 ```
+
+> The bootstrap Application will show as `SyncFailed` briefly on the first sync — this is expected and resolves automatically without manual intervention. The `SkipDryRunOnMissingResource=true` sync option ensures the Subscription is applied even though the ArgoCD CRD does not yet exist, and `selfHeal: true` retries wave 1 once the operator finishes installing.
 
 Once all Applications are `Synced / Healthy`, verify the merged config that was applied to the spoke:
 

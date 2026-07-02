@@ -59,4 +59,11 @@ spec:
           prune: {{ .prune | default false }}
         syncOptions:
           - CreateNamespace=true
+          # On a brand new spoke the argoproj.io Application CRD does not exist yet.
+          # Without this option the dry-run for the root Application CR fails and aborts
+          # the entire sync before the Subscription is ever applied — the operator never
+          # installs. SkipDryRunOnMissingResource bypasses dry-run for unknown CRDs so
+          # the Subscription reaches the cluster on the first attempt. selfHeal then
+          # retries wave 1 once the operator has installed and registered the CRD (~2-3 min).
+          - SkipDryRunOnMissingResource=true
 {{- end }}
